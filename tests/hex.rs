@@ -1,20 +1,18 @@
-#[macro_use]
-extern crate generic_array;
-extern crate typenum;
-
+use generic_array::arr;
+use generic_array::typenum;
 use generic_array::GenericArray;
 use std::str::from_utf8;
 use typenum::U2048;
 
 #[test]
 fn short_lower_hex() {
-    let ar = arr![u8; 10, 20, 30];
+    let ar = arr![10u8, 20, 30];
     assert_eq!(format!("{:x}", ar), "0a141e");
 }
 
 #[test]
 fn short_upper_hex() {
-    let ar = arr![u8; 30, 20, 10];
+    let ar = arr![30u8, 20, 10];
     assert_eq!(format!("{:X}", ar), "1E140A");
 }
 
@@ -44,7 +42,7 @@ fn long_upper_hex_truncated() {
 
 #[test]
 fn truncated_lower_hex() {
-    let ar = arr![u8; 10, 20, 30, 40, 50];
+    let ar = arr![10u8, 20, 30, 40, 50];
     assert_eq!(format!("{:.2x}", ar), "0a");
     assert_eq!(format!("{:.3x}", ar), "0a1");
     assert_eq!(format!("{:.4x}", ar), "0a14");
@@ -52,7 +50,7 @@ fn truncated_lower_hex() {
 
 #[test]
 fn truncated_upper_hex() {
-    let ar = arr![u8; 30, 20, 10, 17, 0];
+    let ar = arr![30u8, 20, 10, 17, 0];
     assert_eq!(format!("{:.4X}", ar), "1E14");
     assert_eq!(format!("{:.5X}", ar), "1E140");
     assert_eq!(format!("{:.6X}", ar), "1E140A");

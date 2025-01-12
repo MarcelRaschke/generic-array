@@ -1,19 +1,24 @@
 //! Useful traits for manipulating sequences of data stored in `GenericArray`s
 
 use super::*;
-use core::ops::{Add, Sub};
 use core::mem::MaybeUninit;
+use core::ops::{Add, Div, Mul, Sub};
 use core::ptr;
 use typenum::operator_aliases::*;
 
 /// Defines some sequence with an associated length and iteration capabilities.
 ///
 /// This is useful for passing N-length generic arrays as generics.
+///
+/// # Safety
+/// Care must be taken when implementing such that methods are safe.
+///
+/// Lengths must match, and element drop on panic must be handled.
 pub unsafe trait GenericSequence<T>: Sized + IntoIterator {
     /// `GenericArray` associated length
-    type Length: ArrayLength<T>;
+    type Length: ArrayLength;
 
-    /// Concrete sequence type used in conjuction with reference implementations of `GenericSequence`
+    /// Owned sequence type used in conjunction with reference implementations of `GenericSequence`
     type Sequence: GenericSequence<T, Length = Self::Length> + FromIterator<T>;
 
     /// Initializes a new sequence instance using the given function.
@@ -24,17 +29,20 @@ pub unsafe trait GenericSequence<T>: Sized + IntoIterator {
     where
         F: FnMut(usize) -> T;
 
-    #[doc(hidden)]
+    /// Treats `self` as the right-hand operand in a zip operation
+    ///
+    /// This is optimized for stack-allocated `GenericArray`s
+    #[cfg_attr(not(feature = "internals"), doc(hidden))]
+    #[inline(always)]
     fn inverted_zip<B, U, F>(
         self,
         lhs: GenericArray<B, Self::Length>,
         mut f: F,
     ) -> MappedSequence<GenericArray<B, Self::Length>, B, U>
     where
-        GenericArray<B, Self::Length>: GenericSequence<B, Length = Self::Length>
-            + MappedGenericSequence<B, U>,
+        GenericArray<B, Self::Length>:
+            GenericSequence<B, Length = Self::Length> + MappedGenericSequence<B, U>,
         Self: MappedGenericSequence<T, U>,
-        Self::Length: ArrayLength<B> + ArrayLength<U>,
         F: FnMut(B, Self::Item) -> U,
     {
         unsafe {
@@ -42,27 +50,26 @@ pub unsafe trait GenericSequence<T>: Sized + IntoIterator {
 
             let (left_array_iter, left_position) = left.iter_position();
 
-            FromIterator::from_iter(left_array_iter.zip(self.into_iter()).map(
-                |(l, right_value)| {
-                        let left_value = ptr::read(l);
+            FromIterator::from_iter(left_array_iter.zip(self).map(|(l, right_value)| {
+                let left_value = ptr::read(l);
 
-                        *left_position += 1;
+                *left_position += 1;
 
-                        f(left_value, right_value)
-                },
-            ))
+                f(left_value, right_value)
+            }))
         }
     }
 
-    #[doc(hidden)]
+    /// Treats `self` as the right-hand operand in a zip operation
+    #[cfg_attr(not(feature = "internals"), doc(hidden))]
+    #[inline(always)]
     fn inverted_zip2<B, Lhs, U, F>(self, lhs: Lhs, mut f: F) -> MappedSequence<Lhs, B, U>
     where
         Lhs: GenericSequence<B, Length = Self::Length> + MappedGenericSequence<B, U>,
         Self: MappedGenericSequence<T, U>,
-        Self::Length: ArrayLength<B> + ArrayLength<U>,
         F: FnMut(Lhs::Item, Self::Item) -> U,
     {
-        FromIterator::from_iter(lhs.into_iter().zip(self.into_iter()).map(|(l, r)| f(l, r)))
+        FromIterator::from_iter(lhs.into_iter().zip(self).map(|(l, r)| f(l, r)))
     }
 }
 
@@ -79,7 +86,7 @@ where
     type Length = S::Length;
     type Sequence = S::Sequence;
 
-    #[inline]
+    #[inline(always)]
     fn generate<F>(f: F) -> Self::Sequence
     where
         F: FnMut(usize) -> T,
@@ -95,7 +102,7 @@ where
     type Length = S::Length;
     type Sequence = S::Sequence;
 
-    #[inline]
+    #[inline(always)]
     fn generate<F>(f: F) -> Self::Sequence
     where
         F: FnMut(usize) -> T,
@@ -108,6 +115,10 @@ where
 /// or prepending an element to it.
 ///
 /// Any lengthened sequence can be shortened back to the original using `pop_front` or `pop_back`
+///
+/// # Safety
+/// While the [`append`](Lengthen::append) and [`prepend`](Lengthen::prepend)
+/// methods are marked safe, care must be taken when implementing them.
 pub unsafe trait Lengthen<T>: Sized + GenericSequence<T> {
     /// `GenericSequence` that has one more element than `Self`
     type Longer: Shorten<T, Shorter = Self>;
@@ -118,13 +129,12 @@ pub unsafe trait Lengthen<T>: Sized + GenericSequence<T> {
     ///
     /// ```rust
     /// # use generic_array::{arr, sequence::Lengthen};
-    /// # fn main() {
-    /// let a = arr![i32; 1, 2, 3];
+    ///
+    /// let a = arr![1, 2, 3];
     ///
     /// let b = a.append(4);
     ///
-    /// assert_eq!(b, arr![i32; 1, 2, 3, 4]);
-    /// # }
+    /// assert_eq!(b, arr![1, 2, 3, 4]);
     /// ```
     fn append(self, last: T) -> Self::Longer;
 
@@ -134,13 +144,12 @@ pub unsafe trait Lengthen<T>: Sized + GenericSequence<T> {
     ///
     /// ```rust
     /// # use generic_array::{arr, sequence::Lengthen};
-    /// # fn main() {
-    /// let a = arr![i32; 1, 2, 3];
+    ///
+    /// let a = arr![1, 2, 3];
     ///
     /// let b = a.prepend(4);
     ///
-    /// assert_eq!(b, arr![i32; 4, 1, 2, 3]);
-    /// # }
+    /// assert_eq!(b, arr![4, 1, 2, 3]);
     /// ```
     fn prepend(self, first: T) -> Self::Longer;
 }
@@ -149,6 +158,10 @@ pub unsafe trait Lengthen<T>: Sized + GenericSequence<T> {
 ///
 /// Additionally, any shortened sequence can be lengthened by
 /// appending or prepending an element to it.
+///
+/// # Safety
+/// While the [`pop_back`](Shorten::pop_back) and [`pop_front`](Shorten::pop_front)
+/// methods are marked safe, care must be taken when implementing them.
 pub unsafe trait Shorten<T>: Sized + GenericSequence<T> {
     /// `GenericSequence` that has one less element than `Self`
     type Shorter: Lengthen<T, Longer = Self>;
@@ -159,14 +172,13 @@ pub unsafe trait Shorten<T>: Sized + GenericSequence<T> {
     ///
     /// ```rust
     /// # use generic_array::{arr, sequence::Shorten};
-    /// # fn main() {
-    /// let a = arr![i32; 1, 2, 3, 4];
+    ///
+    /// let a = arr![1, 2, 3, 4];
     ///
     /// let (init, last) = a.pop_back();
     ///
-    /// assert_eq!(init, arr![i32; 1, 2, 3]);
+    /// assert_eq!(init, arr![1, 2, 3]);
     /// assert_eq!(last, 4);
-    /// # }
     /// ```
     fn pop_back(self) -> (Self::Shorter, T);
 
@@ -175,27 +187,27 @@ pub unsafe trait Shorten<T>: Sized + GenericSequence<T> {
     ///
     /// ```rust
     /// # use generic_array::{arr, sequence::Shorten};
-    /// # fn main() {
-    /// let a = arr![i32; 1, 2, 3, 4];
+    ///
+    /// let a = arr![1, 2, 3, 4];
     ///
     /// let (head, tail) = a.pop_front();
     ///
     /// assert_eq!(head, 1);
-    /// assert_eq!(tail, arr![i32; 2, 3, 4]);
-    /// # }
+    /// assert_eq!(tail, arr![2, 3, 4]);
     /// ```
     fn pop_front(self) -> (T, Self::Shorter);
 }
 
-unsafe impl<T, N: ArrayLength<T>> Lengthen<T> for GenericArray<T, N>
+unsafe impl<T, N: ArrayLength> Lengthen<T> for GenericArray<T, N>
 where
     N: Add<B1>,
-    Add1<N>: ArrayLength<T>,
+    Add1<N>: ArrayLength,
     Add1<N>: Sub<B1, Output = N>,
-    Sub1<Add1<N>>: ArrayLength<T>,
+    Sub1<Add1<N>>: ArrayLength,
 {
     type Longer = GenericArray<T, Add1<N>>;
 
+    #[inline]
     fn append(self, last: T) -> Self::Longer {
         let mut longer: MaybeUninit<Self::Longer> = MaybeUninit::uninit();
 
@@ -212,6 +224,7 @@ where
         }
     }
 
+    #[inline]
     fn prepend(self, first: T) -> Self::Longer {
         let mut longer: MaybeUninit<Self::Longer> = MaybeUninit::uninit();
 
@@ -229,15 +242,16 @@ where
     }
 }
 
-unsafe impl<T, N: ArrayLength<T>> Shorten<T> for GenericArray<T, N>
+unsafe impl<T, N: ArrayLength> Shorten<T> for GenericArray<T, N>
 where
     N: Sub<B1>,
-    Sub1<N>: ArrayLength<T>,
+    Sub1<N>: ArrayLength,
     Sub1<N>: Add<B1, Output = N>,
-    Add1<Sub1<N>>: ArrayLength<T>,
+    Add1<Sub1<N>>: ArrayLength,
 {
     type Shorter = GenericArray<T, Sub1<N>>;
 
+    #[inline]
     fn pop_back(self) -> (Self::Shorter, T) {
         let whole = ManuallyDrop::new(self);
 
@@ -249,6 +263,7 @@ where
         }
     }
 
+    #[inline]
     fn pop_front(self) -> (T, Self::Shorter) {
         // ensure this doesn't get dropped
         let whole = ManuallyDrop::new(self);
@@ -263,10 +278,11 @@ where
 }
 
 /// Defines a `GenericSequence` that can be split into two parts at a given pivot index.
-pub unsafe trait Split<T, K>: GenericSequence<T>
-where
-    K: ArrayLength<T>,
-{
+///
+/// # Safety
+/// While the [`split`](Split::split) method is marked safe,
+/// care must be taken when implementing it.
+pub unsafe trait Split<T, K: ArrayLength>: GenericSequence<T> {
     /// First part of the resulting split array
     type First: GenericSequence<T>;
     /// Second part of the resulting split array
@@ -278,14 +294,15 @@ where
 
 unsafe impl<T, N, K> Split<T, K> for GenericArray<T, N>
 where
-    N: ArrayLength<T>,
-    K: ArrayLength<T>,
+    N: ArrayLength,
+    K: ArrayLength,
     N: Sub<K>,
-    Diff<N, K>: ArrayLength<T>,
+    Diff<N, K>: ArrayLength,
 {
     type First = GenericArray<T, K>;
     type Second = GenericArray<T, Diff<N, K>>;
 
+    #[inline]
     fn split(self) -> (Self::First, Self::Second) {
         unsafe {
             // ensure this doesn't get dropped
@@ -301,14 +318,15 @@ where
 
 unsafe impl<'a, T, N, K> Split<T, K> for &'a GenericArray<T, N>
 where
-    N: ArrayLength<T>,
-    K: ArrayLength<T> + 'static,
+    N: ArrayLength,
+    K: ArrayLength,
     N: Sub<K>,
-    Diff<N, K>: ArrayLength<T>,
+    Diff<N, K>: ArrayLength,
 {
     type First = &'a GenericArray<T, K>;
     type Second = &'a GenericArray<T, Diff<N, K>>;
 
+    #[inline]
     fn split(self) -> (Self::First, Self::Second) {
         unsafe {
             let ptr_to_first: *const T = self.as_ptr();
@@ -321,14 +339,15 @@ where
 
 unsafe impl<'a, T, N, K> Split<T, K> for &'a mut GenericArray<T, N>
 where
-    N: ArrayLength<T>,
-    K: ArrayLength<T> + 'static,
+    N: ArrayLength,
+    K: ArrayLength,
     N: Sub<K>,
-    Diff<N, K>: ArrayLength<T>,
+    Diff<N, K>: ArrayLength,
 {
     type First = &'a mut GenericArray<T, K>;
     type Second = &'a mut GenericArray<T, Diff<N, K>>;
 
+    #[inline]
     fn split(self) -> (Self::First, Self::Second) {
         unsafe {
             let ptr_to_first: *mut T = self.as_mut_ptr();
@@ -340,10 +359,11 @@ where
 }
 
 /// Defines `GenericSequence`s which can be joined together, forming a larger array.
-pub unsafe trait Concat<T, M>: GenericSequence<T>
-where
-    M: ArrayLength<T>,
-{
+///
+/// # Safety
+/// While the [`concat`](Concat::concat) method is marked safe,
+/// care must be taken when implementing it.
+pub unsafe trait Concat<T, M: ArrayLength>: GenericSequence<T> {
     /// Sequence to be concatenated with `self`
     type Rest: GenericSequence<T, Length = M>;
 
@@ -356,13 +376,14 @@ where
 
 unsafe impl<T, N, M> Concat<T, M> for GenericArray<T, N>
 where
-    N: ArrayLength<T> + Add<M>,
-    M: ArrayLength<T>,
-    Sum<N, M>: ArrayLength<T>,
+    N: ArrayLength + Add<M>,
+    M: ArrayLength,
+    Sum<N, M>: ArrayLength,
 {
     type Rest = GenericArray<T, M>;
     type Output = GenericArray<T, Sum<N, M>>;
 
+    #[inline]
     fn concat(self, rest: Self::Rest) -> Self::Output {
         let mut output: MaybeUninit<Self::Output> = MaybeUninit::uninit();
 
@@ -376,5 +397,280 @@ where
 
             output.assume_init()
         }
+    }
+}
+
+/// Defines a `GenericSequence` which can be shortened by removing an element at a given index.
+///
+/// # Safety
+/// While the [`remove`](Remove::remove) and [`swap_remove`](Remove::swap_remove) methods are marked safe,
+/// care must be taken when implementing it. The [`remove_unchecked`](Remove::remove_unchecked)
+/// and [`swap_remove_unchecked`](Remove::swap_remove_unchecked) methods are unsafe
+/// and must be used with caution.
+pub unsafe trait Remove<T, N: ArrayLength>: GenericSequence<T> {
+    /// Resulting sequence formed by removing an element at the given index.
+    type Output: GenericSequence<T>;
+
+    /// Removes an element at the given index, shifting elements
+    /// after the given index to the left to fill the gap, resulting
+    /// in a time complexity of O(n) where `n=N-idx-1`
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # use generic_array::{arr, sequence::Remove};
+    /// let a = arr![1, 2, 3, 4];
+    ///
+    /// let (removed, b) = a.remove(2);
+    /// assert_eq!(removed, 3);
+    /// assert_eq!(b, arr![1, 2, 4]);
+    /// ```
+    ///
+    /// # Panics
+    ///
+    /// Panics if the index is out of bounds.
+    #[inline]
+    fn remove(self, idx: usize) -> (T, Self::Output) {
+        assert!(
+            idx < N::USIZE,
+            "Index out of bounds: the len is {} but the index is {}",
+            N::USIZE,
+            idx
+        );
+
+        unsafe { self.remove_unchecked(idx) }
+    }
+
+    /// Removes an element at the given index, swapping it with the last element.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # use generic_array::{arr, sequence::Remove};
+    /// let a = arr![1, 2, 3, 4];
+    ///
+    /// let (removed, b) = a.swap_remove(1);
+    /// assert_eq!(removed, 2);
+    /// assert_eq!(b, arr![1, 4, 3]); // note 4 is now at index 1
+    /// ```
+    ///
+    /// # Panics
+    ///
+    /// Panics if the index is out of bounds.
+    fn swap_remove(self, idx: usize) -> (T, Self::Output) {
+        assert!(
+            idx < N::USIZE,
+            "Index out of bounds: the len is {} but the index is {}",
+            N::USIZE,
+            idx
+        );
+
+        unsafe { self.swap_remove_unchecked(idx) }
+    }
+
+    /// Removes an element at the given index without bounds checking,
+    /// shifting elements after the given index to the left to fill the gap,
+    /// resulting in a time complexity of O(n) where `n=N-idx-1`
+    ///
+    /// See [`remove`](Remove::remove) for an example.
+    ///
+    /// # Safety
+    /// The caller must ensure that the index is within bounds, otherwise
+    /// it is undefined behavior.
+    unsafe fn remove_unchecked(self, idx: usize) -> (T, Self::Output);
+
+    /// Removes an element at the given index without bounds checking, swapping it with the last element.
+    ///
+    /// See [`swap_remove`](Remove::swap_remove) for an example.
+    ///
+    /// # Safety
+    /// The caller must ensure that the index is within bounds, otherwise
+    /// it is undefined behavior.
+    unsafe fn swap_remove_unchecked(self, idx: usize) -> (T, Self::Output);
+}
+
+unsafe impl<T, N> Remove<T, N> for GenericArray<T, N>
+where
+    N: ArrayLength + Sub<B1>,
+    Sub1<N>: ArrayLength,
+{
+    type Output = GenericArray<T, Sub1<N>>;
+
+    #[inline]
+    unsafe fn remove_unchecked(self, idx: usize) -> (T, Self::Output) {
+        if idx >= N::USIZE || N::USIZE == 0 {
+            core::hint::unreachable_unchecked();
+        }
+
+        let mut array = ManuallyDrop::new(self);
+
+        let dst = array.as_mut_ptr().add(idx);
+
+        let removed = ptr::read(dst);
+
+        // shift all elements over by one to fill gap
+        ptr::copy(dst.add(1), dst, N::USIZE - idx - 1);
+
+        // return removed element and truncated array
+        (removed, mem::transmute_copy(&array))
+    }
+
+    #[inline]
+    unsafe fn swap_remove_unchecked(self, idx: usize) -> (T, Self::Output) {
+        if idx >= N::USIZE || N::USIZE == 0 {
+            core::hint::unreachable_unchecked();
+        }
+
+        let mut array = ManuallyDrop::new(self);
+
+        array.swap(idx, N::USIZE - 1);
+
+        // remove the last element
+        let removed = ptr::read(array.as_ptr().add(N::USIZE - 1));
+
+        // return removed element and truncated array
+        (removed, mem::transmute_copy(&array))
+    }
+}
+
+/// Defines a `GenericSequence` of `GenericArray`s which can be flattened into a single `GenericArray`,
+/// at zero cost.
+///
+/// # Safety
+/// While the [`flatten`](Flatten::flatten) method is marked safe,
+/// care must be taken when implementing it. However, the given trait bounds
+/// should be sufficient to ensure safety.
+pub unsafe trait Flatten<T, N, M>: GenericSequence<GenericArray<T, N>, Length = M>
+where
+    N: ArrayLength + Mul<M>,
+    Prod<N, M>: ArrayLength,
+{
+    /// Flattened sequence type
+    type Output: GenericSequence<T, Length = Prod<N, M>>;
+
+    /// Flattens the sequence into a single `GenericArray`.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # use generic_array::{arr, sequence::Flatten};
+    /// assert_eq!(
+    ///     arr![arr![1, 2], arr![3, 4], arr![5, 6]].flatten(),
+    ///     arr![1, 2, 3, 4, 5, 6]
+    /// );
+    /// ```
+    fn flatten(self) -> Self::Output;
+}
+
+/// Defines a `GenericSequence` of `T` which can be split evenly into a sequence of `GenericArray`s,
+///
+/// # Safety
+/// While the [`unflatten`](Unflatten::unflatten) method is marked safe,
+/// care must be taken when implementing it. However, the given trait bounds
+/// should be sufficient to ensure safety.
+pub unsafe trait Unflatten<T, NM, N>: GenericSequence<T, Length = NM>
+where
+    NM: ArrayLength + Div<N>,
+    N: ArrayLength,
+    Quot<NM, N>: ArrayLength,
+{
+    /// Unflattened sequence type
+    type Output: GenericSequence<GenericArray<T, N>, Length = Quot<NM, N>>;
+
+    /// Unflattens the sequence into a sequence of `GenericArray`s.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # use generic_array::{arr, sequence::Unflatten};
+    /// assert_eq!(
+    ///     arr![1, 2, 3, 4, 5, 6].unflatten(),
+    ///     arr![arr![1, 2], arr![3, 4], arr![5, 6]]
+    /// );
+    /// ```
+    fn unflatten(self) -> Self::Output;
+}
+
+unsafe impl<T, N, M> Flatten<T, N, M> for GenericArray<GenericArray<T, N>, M>
+where
+    N: ArrayLength + Mul<M>,
+    M: ArrayLength,
+    Prod<N, M>: ArrayLength,
+{
+    type Output = GenericArray<T, Prod<N, M>>;
+
+    #[inline(always)]
+    fn flatten(self) -> Self::Output {
+        unsafe { crate::const_transmute(self) }
+    }
+}
+
+unsafe impl<'a, T, N, M> Flatten<T, N, M> for &'a GenericArray<GenericArray<T, N>, M>
+where
+    N: ArrayLength + Mul<M>,
+    M: ArrayLength,
+    Prod<N, M>: ArrayLength,
+{
+    type Output = &'a GenericArray<T, Prod<N, M>>;
+
+    #[inline(always)]
+    fn flatten(self) -> Self::Output {
+        unsafe { mem::transmute(self) }
+    }
+}
+
+unsafe impl<'a, T, N, M> Flatten<T, N, M> for &'a mut GenericArray<GenericArray<T, N>, M>
+where
+    N: ArrayLength + Mul<M>,
+    M: ArrayLength,
+    Prod<N, M>: ArrayLength,
+{
+    type Output = &'a mut GenericArray<T, Prod<N, M>>;
+
+    #[inline(always)]
+    fn flatten(self) -> Self::Output {
+        unsafe { mem::transmute(self) }
+    }
+}
+
+unsafe impl<T, NM, N> Unflatten<T, NM, N> for GenericArray<T, NM>
+where
+    NM: ArrayLength + Div<N>,
+    N: ArrayLength,
+    Quot<NM, N>: ArrayLength,
+{
+    type Output = GenericArray<GenericArray<T, N>, Quot<NM, N>>;
+
+    #[inline(always)]
+    fn unflatten(self) -> Self::Output {
+        unsafe { crate::const_transmute(self) }
+    }
+}
+
+unsafe impl<'a, T, NM, N> Unflatten<T, NM, N> for &'a GenericArray<T, NM>
+where
+    NM: ArrayLength + Div<N>,
+    N: ArrayLength,
+    Quot<NM, N>: ArrayLength,
+{
+    type Output = &'a GenericArray<GenericArray<T, N>, Quot<NM, N>>;
+
+    #[inline(always)]
+    fn unflatten(self) -> Self::Output {
+        unsafe { mem::transmute(self) }
+    }
+}
+
+unsafe impl<'a, T, NM, N> Unflatten<T, NM, N> for &'a mut GenericArray<T, NM>
+where
+    NM: ArrayLength + Div<N>,
+    N: ArrayLength,
+    Quot<NM, N>: ArrayLength,
+{
+    type Output = &'a mut GenericArray<GenericArray<T, N>, Quot<NM, N>>;
+
+    #[inline(always)]
+    fn unflatten(self) -> Self::Output {
+        unsafe { mem::transmute(self) }
     }
 }

@@ -3,10 +3,10 @@
 use super::{ArrayLength, GenericArray};
 use core::iter::FusedIterator;
 use core::mem::ManuallyDrop;
-use core::{cmp, fmt, ptr, mem};
+use core::{cmp, fmt, mem, ptr};
 
-/// An iterator that moves out of a `GenericArray`
-pub struct GenericArrayIter<T, N: ArrayLength<T>> {
+/// An iterator that moves out of a [`GenericArray`]
+pub struct GenericArrayIter<T, N: ArrayLength> {
     // Invariants: index <= index_back <= N
     // Only values in array[index..index_back] are alive at any given time.
     // Values from array[..index] and array[index_back..] are already moved/dropped.
@@ -15,42 +15,27 @@ pub struct GenericArrayIter<T, N: ArrayLength<T>> {
     index_back: usize,
 }
 
-#[cfg(test)]
-mod test {
-    use super::*;
-
-    fn send<I: Send>(_iter: I) {}
-
-    #[test]
-    fn test_send_iter() {
-        send(GenericArray::from([1, 2, 3, 4]).into_iter());
-    }
-}
-
-impl<T, N> GenericArrayIter<T, N>
-where
-    N: ArrayLength<T>,
-{
+impl<T, N: ArrayLength> GenericArrayIter<T, N> {
     /// Returns the remaining items of this iterator as a slice
-    #[inline]
+    #[inline(always)]
     pub fn as_slice(&self) -> &[T] {
-        &self.array.as_slice()[self.index..self.index_back]
+        // SAFETY: index and index_back are guaranteed to be within bounds
+        unsafe { self.array.get_unchecked(self.index..self.index_back) }
     }
 
     /// Returns the remaining items of this iterator as a mutable slice
-    #[inline]
+    #[inline(always)]
     pub fn as_mut_slice(&mut self) -> &mut [T] {
-        &mut self.array.as_mut_slice()[self.index..self.index_back]
+        // SAFETY: index and index_back are guaranteed to be within bounds
+        unsafe { self.array.get_unchecked_mut(self.index..self.index_back) }
     }
 }
 
-impl<T, N> IntoIterator for GenericArray<T, N>
-where
-    N: ArrayLength<T>,
-{
+impl<T, N: ArrayLength> IntoIterator for GenericArray<T, N> {
     type Item = T;
     type IntoIter = GenericArrayIter<T, N>;
 
+    #[inline]
     fn into_iter(self) -> Self::IntoIter {
         GenericArrayIter {
             array: ManuallyDrop::new(self),
@@ -61,10 +46,7 @@ where
 }
 
 // Based on work in rust-lang/rust#49000
-impl<T: fmt::Debug, N> fmt::Debug for GenericArrayIter<T, N>
-where
-    N: ArrayLength<T>,
-{
+impl<T: fmt::Debug, N: ArrayLength> fmt::Debug for GenericArrayIter<T, N> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_tuple("GenericArrayIter")
             .field(&self.as_slice())
@@ -72,53 +54,37 @@ where
     }
 }
 
-impl<T, N> Drop for GenericArrayIter<T, N>
-where
-    N: ArrayLength<T>,
-{
-    #[inline]
+impl<T, N: ArrayLength> Drop for GenericArrayIter<T, N> {
     fn drop(&mut self) {
-        if mem::needs_drop::<T>() {
-            // Drop values that are still alive.
-            for p in self.as_mut_slice() {
-                unsafe {
-                    ptr::drop_in_place(p);
-                }
-            }
+        unsafe {
+            ptr::drop_in_place(self.as_mut_slice());
         }
     }
 }
 
 // Based on work in rust-lang/rust#49000
-impl<T: Clone, N> Clone for GenericArrayIter<T, N>
-where
-    N: ArrayLength<T>,
-{
+impl<T: Clone, N: ArrayLength> Clone for GenericArrayIter<T, N> {
     fn clone(&self) -> Self {
         // This places all cloned elements at the start of the new array iterator,
         // not at their original indices.
-        unsafe {
-            let mut array = ptr::read(&self.array);
-            let mut index_back = 0;
 
-            for (dst, src) in array.as_mut_slice().into_iter().zip(self.as_slice()) {
-                ptr::write(dst, src.clone());
-                index_back += 1;
-            }
+        let mut array = unsafe { ptr::read(&self.array) };
+        let mut index_back = 0;
 
-            GenericArrayIter {
-                array,
-                index: 0,
-                index_back
-            }
+        for (dst, src) in array.as_mut_slice().iter_mut().zip(self.as_slice()) {
+            unsafe { ptr::write(dst, src.clone()) };
+            index_back += 1;
+        }
+
+        GenericArrayIter {
+            array,
+            index: 0,
+            index_back,
         }
     }
 }
 
-impl<T, N> Iterator for GenericArrayIter<T, N>
-where
-    N: ArrayLength<T>,
-{
+impl<T, N: ArrayLength> Iterator for GenericArrayIter<T, N> {
     type Item = T;
 
     #[inline]
@@ -134,6 +100,7 @@ where
         }
     }
 
+    #[inline]
     fn fold<B, F>(mut self, init: B, mut f: F) -> B
     where
         F: FnMut(B, Self::Item) -> B,
@@ -145,7 +112,7 @@ where
                 index_back,
             } = self;
 
-            let remaining = &array[*index..index_back];
+            let remaining = array.get_unchecked(*index..index_back);
 
             remaining.iter().fold(init, |acc, src| {
                 let value = ptr::read(src);
@@ -156,34 +123,38 @@ where
             })
         };
 
-        // ensure the drop happens here after iteration
-        drop(self);
+        // The current iterator is now empty after the remaining items are
+        // consumed by the above folding. Dropping it is unnecessary,
+        // so avoid the drop codegen and forget it instead. The iterator
+        // will still drop on panics from `f`, of course.
+        //
+        // Furthermore, putting `forget` here at the end ensures the above
+        // destructuring never moves by value, so its behavior on drop remains intact.
+        mem::forget(self);
 
         ret
     }
 
-    #[inline]
+    #[inline(always)]
     fn size_hint(&self) -> (usize, Option<usize>) {
         let len = self.len();
         (len, Some(len))
     }
 
-    #[inline]
+    #[inline(always)]
     fn count(self) -> usize {
         self.len()
     }
 
     fn nth(&mut self, n: usize) -> Option<T> {
         // First consume values prior to the nth.
-        let ndrop = cmp::min(n, self.len());
+        let next_index = self.index + cmp::min(n, self.len());
 
-        for p in &mut self.array[self.index..self.index + ndrop] {
-            self.index += 1;
-
-            unsafe {
-                ptr::drop_in_place(p);
-            }
+        unsafe {
+            ptr::drop_in_place(self.array.get_unchecked_mut(self.index..next_index));
         }
+
+        self.index = next_index;
 
         self.next()
     }
@@ -195,10 +166,8 @@ where
     }
 }
 
-impl<T, N> DoubleEndedIterator for GenericArrayIter<T, N>
-where
-    N: ArrayLength<T>,
-{
+impl<T, N: ArrayLength> DoubleEndedIterator for GenericArrayIter<T, N> {
+    #[inline]
     fn next_back(&mut self) -> Option<T> {
         if self.index < self.index_back {
             self.index_back -= 1;
@@ -209,6 +178,7 @@ where
         }
     }
 
+    #[inline]
     fn rfold<B, F>(mut self, init: B, mut f: F) -> B
     where
         F: FnMut(B, Self::Item) -> B,
@@ -220,7 +190,7 @@ where
                 ref mut index_back,
             } = self;
 
-            let remaining = &array[index..*index_back];
+            let remaining = array.get_unchecked(index..*index_back);
 
             remaining.iter().rfold(init, |acc, src| {
                 let value = ptr::read(src);
@@ -231,26 +201,44 @@ where
             })
         };
 
-        // ensure the drop happens here after iteration
-        drop(self);
+        // Same as `fold`
+        mem::forget(self);
 
         ret
     }
+
+    fn nth_back(&mut self, n: usize) -> Option<T> {
+        let next_back = self.index_back - cmp::min(n, self.len());
+
+        unsafe {
+            ptr::drop_in_place(self.array.get_unchecked_mut(next_back..self.index_back));
+        }
+
+        self.index_back = next_back;
+
+        self.next_back()
+    }
 }
 
-impl<T, N> ExactSizeIterator for GenericArrayIter<T, N>
-where
-    N: ArrayLength<T>,
-{
+impl<T, N: ArrayLength> ExactSizeIterator for GenericArrayIter<T, N> {
+    #[inline]
     fn len(&self) -> usize {
         self.index_back - self.index
     }
 }
 
-impl<T, N> FusedIterator for GenericArrayIter<T, N>
-where
-    N: ArrayLength<T>,
-{
-}
+impl<T, N: ArrayLength> FusedIterator for GenericArrayIter<T, N> {}
 
 // TODO: Implement `TrustedLen` when stabilized
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    fn send<I: Send>(_iter: I) {}
+
+    #[test]
+    fn test_send_iter() {
+        send(GenericArray::from([1, 2, 3, 4]).into_iter());
+    }
+}
