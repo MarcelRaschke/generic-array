@@ -141,9 +141,8 @@
 //! ]
 //! ```
 
-#![deny(missing_docs)]
-#![deny(meta_variable_misuse)]
 #![no_std]
+#![deny(missing_docs, meta_variable_misuse, clippy::missing_safety_doc)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 pub extern crate typenum;
@@ -164,6 +163,7 @@ mod ext_impls;
 pub type GenericBitArray<T, N, O = bitvec::order::Lsb0> =
     bitvec::array::BitArray<GenericArray<T, N>, O>;
 
+use core::cell::Cell;
 use core::iter::FromIterator;
 use core::marker::PhantomData;
 use core::mem::{ManuallyDrop, MaybeUninit};
@@ -1140,6 +1140,13 @@ impl<T, N: ArrayLength> GenericArray<T, N> {
     {
         unsafe { mem::transmute(chunks) }
     }
+
+    /// Returns a `&GenericArray<Cell<T>, N>` from a `&Cell<GenericArray<T, N>>`.
+    #[inline(always)]
+    pub const fn as_array_of_cells(cell: &Cell<GenericArray<T, N>>) -> &GenericArray<Cell<T>, N> {
+        // SAFETY: `Cell<T>` has the same memory layout as `T`.
+        unsafe { &*(cell as *const Cell<GenericArray<T, N>> as *const GenericArray<Cell<T>, N>) }
+    }
 }
 
 impl<T, N: ArrayLength> GenericArray<T, N> {
@@ -1321,24 +1328,23 @@ pub const unsafe fn const_transmute<A, B>(a: A) -> B {
 
     #[rustversion::since(1.83)]
     #[inline(always)]
-    const unsafe fn do_transmute<A, B>(a: A) -> B {
-        mem::transmute_copy(&ManuallyDrop::new(a))
+    const unsafe fn do_transmute<A, B>(a: ManuallyDrop<A>) -> B {
+        mem::transmute_copy(&a)
     }
 
     #[rustversion::before(1.83)]
     #[inline(always)]
-    const unsafe fn do_transmute<A, B>(a: A) -> B {
+    const unsafe fn do_transmute<A, B>(a: ManuallyDrop<A>) -> B {
         #[repr(C)]
         union Union<A, B> {
             a: ManuallyDrop<A>,
             b: ManuallyDrop<B>,
         }
 
-        let a = ManuallyDrop::new(a);
         ManuallyDrop::into_inner(Union { a }.b)
     }
 
-    do_transmute(a)
+    do_transmute(ManuallyDrop::new(a))
 }
 
 #[cfg(test)]

@@ -34,6 +34,11 @@ impl<T, N: ArrayLength> ArrayBuilder<T, N> {
     ///
     /// This makes no attempt to continue where a previous `extend` leaves off. Therefore, it should
     /// only be used once per `ArrayBuilder`.
+    ///
+    /// # Safety
+    ///
+    /// You MUST ensure that the source iterator yields enough elements to fill the array,
+    /// or fill the remaining uninitialized elements in other ways, to avoid undefined behavior.
     #[inline(always)]
     pub unsafe fn extend(&mut self, source: impl Iterator<Item = T>) {
         let (destination, position) = (self.array.iter_mut(), &mut self.position);
@@ -73,6 +78,11 @@ impl<T, N: ArrayLength> ArrayBuilder<T, N> {
     /// }
     /// # }
     /// ```
+    ///
+    /// # Safety
+    ///
+    /// You MUST increment the position as you write elements to avoid
+    /// double-dropping or uninitialized data.
     #[inline(always)]
     pub unsafe fn iter_position(
         &'_ mut self,
@@ -84,6 +94,10 @@ impl<T, N: ArrayLength> ArrayBuilder<T, N> {
     /// get the inner array.
     ///
     /// This method is `const` since Rust 1.83.0, but non-`const` before.
+    ///
+    /// # Safety
+    ///
+    /// You MUST have written all elements to avoid undefined behavior.
     #[rustversion::attr(since(1.83), const)]
     #[inline(always)]
     pub unsafe fn assume_init(self) -> GenericArray<T, N> {
@@ -147,6 +161,11 @@ impl<'a, T, N: ArrayLength> IntrusiveArrayBuilder<'a, T, N> {
     ///
     /// This makes no attempt to continue where a previous `extend` leaves off. Therefore, it should
     /// only be used once per `ArrayBuilder`.
+    ///
+    /// # Safety
+    ///
+    /// You MUST ensure that the source iterator yields enough elements to fill the array,
+    /// or fill the remaining uninitialized elements in other ways, to avoid undefined behavior.
     #[inline(always)]
     pub unsafe fn extend(&mut self, source: impl Iterator<Item = T>) {
         let (destination, position) = (self.array.iter_mut(), &mut self.position);
@@ -162,6 +181,11 @@ impl<'a, T, N: ArrayLength> IntrusiveArrayBuilder<'a, T, N> {
     ///
     /// This makes no attempt to continue where a previous `extend` leaves off. Therefore, it should
     /// only be used once per `ArrayBuilder`.
+    ///
+    /// # Safety
+    ///
+    /// You MUST ensure that the source iterator yields enough elements to fill the array,
+    /// or fill the remaining uninitialized elements in other ways, to avoid undefined behavior.
     #[inline(always)]
     pub unsafe fn try_extend<E>(
         &mut self,
@@ -213,6 +237,11 @@ impl<'a, T, N: ArrayLength> IntrusiveArrayBuilder<'a, T, N> {
     /// }
     /// # }
     /// ```
+    ///
+    /// # Safety
+    ///
+    /// You MUST increment the position as you write elements to avoid
+    /// double-dropping or uninitialized data.
     #[inline(always)]
     pub unsafe fn iter_position(
         &'_ mut self,
@@ -222,6 +251,10 @@ impl<'a, T, N: ArrayLength> IntrusiveArrayBuilder<'a, T, N> {
 
     /// When done writing (assuming all elements have been written to), mark the builder
     /// as finished to avoid dropping the initialized elements.
+    ///
+    /// # Safety
+    ///
+    /// You MUST have written all elements to avoid undefined behavior.
     #[inline(always)]
     pub const unsafe fn finish(self) {
         debug_assert!(self.is_full());
@@ -232,6 +265,10 @@ impl<'a, T, N: ArrayLength> IntrusiveArrayBuilder<'a, T, N> {
     /// as finished to avoid dropping the initialized elements, and get the inner array.
     ///
     /// This method is `const` since Rust 1.71.0, but non-`const` before.
+    ///
+    /// # Safety
+    ///
+    /// You MUST have written all elements to avoid undefined behavior.
     #[rustversion::attr(since(1.71), const)]
     #[inline(always)]
     pub unsafe fn finish_and_assume_init(self) -> GenericArray<T, N> {
@@ -248,6 +285,10 @@ impl<'a, T, N: ArrayLength> IntrusiveArrayBuilder<'a, T, N> {
     }
 
     /// Similar to [`GenericArray::assume_init`] but for arrays passed to `IntrusiveArrayBuilder`.
+    ///
+    /// # Safety
+    ///
+    /// You MUST ensure that all elements have been initialized to avoid undefined behavior.
     #[deprecated(
         since = "1.3.4",
         note = "See `iter_position` for modern usage pattern without this function"
@@ -296,6 +337,10 @@ impl<T, N: ArrayLength> ArrayConsumer<T, N> {
     /// to keep track of consumed elements.
     ///
     /// You MUST increment the position as you iterate to mark off consumed elements.
+    ///
+    /// # Safety
+    ///
+    /// You MUST increment the position while iterating.
     #[inline(always)]
     pub unsafe fn iter_position(&'_ mut self) -> (slice::Iter<'_, T>, &'_ mut usize) {
         (self.array.iter(), &mut self.position)
@@ -333,6 +378,10 @@ impl<'a, T, N: ArrayLength> IntrusiveArrayConsumer<'a, T, N> {
     /// to keep track of consumed elements.
     ///
     /// You MUST increment the position as you iterate to mark off consumed elements.
+    ///
+    /// # Safety
+    ///
+    /// You MUST increment the position while iterating.
     #[inline(always)]
     pub unsafe fn iter_position(&'_ mut self) -> (slice::Iter<'_, T>, &'_ mut usize) {
         (self.array.iter(), &mut self.position)
