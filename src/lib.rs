@@ -159,6 +159,11 @@ mod iter;
 
 mod ext_impls;
 
+/// `BitArray` type alias with `GenericArray` as the backing storage
+#[cfg(feature = "bitvec")]
+pub type GenericBitArray<T, N, O = bitvec::order::Lsb0> =
+    bitvec::array::BitArray<GenericArray<T, N>, O>;
+
 use core::iter::FromIterator;
 use core::marker::PhantomData;
 use core::mem::{ManuallyDrop, MaybeUninit};

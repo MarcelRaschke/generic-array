@@ -1,5 +1,5 @@
 * **(unreleased)**
-    * Add `subtle`, `arbitrary`, `bytemuck`, and `as-slice` implementations for `GenericArray`.
+    * Add `subtle`, `arbitrary`, `bytemuck`, `bitvec` and `as-slice` implementations for `GenericArray`.
     * Add `GenericSequence::repeat` for creating sequences/arrays with repeated elements.
     * Add `FallibleGenericSequence` with `try_generate` and `from_fallible_iter` for fallible generation of sequences/arrays.
     * Add `try_fold` and `try_map` to `FunctionalSequence` for fallible folding/mapping of sequences/arrays.

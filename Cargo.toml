@@ -27,6 +27,7 @@ internals = []
 serde = ["dep:serde_core"]
 compat-0_14 = ["dep:generic_array-0_14"]
 as_slice = ["dep:as-slice"]
+bitvec = ["dep:bitvec", "const-default"]
 
 [dependencies]
 typenum = { version = "1.19", features = ["const-generics"] }
@@ -40,6 +41,7 @@ subtle = { version = "2", optional = true, default-features = false }
 arbitrary = { version = "1", optional = true, default-features = false }
 bytemuck = { version = "1", optional = true, default-features = false }
 as-slice = { version = "0.2", optional = true, default-features = false }
+bitvec = { version = "1", optional = true, default-features = false }
 
 generic_array-0_14 = { package = "generic-array", version = "0.14", optional = true, default-features = false }
 hybrid-array-0_4 = { package = "hybrid-array", version = "0.4", optional = true, default-features = false }
@@ -64,7 +66,7 @@ codegen-units = 1
 
 [package.metadata.docs.rs]
 # all but "internals", don't show those on docs.rs
-features = ["serde", "zeroize", "const-default", "alloc", "hybrid-array-0_4", "subtle", "arbitrary", "bytemuck"]
+features = ["serde", "zeroize", "const-default", "alloc", "hybrid-array-0_4", "subtle", "arbitrary", "bytemuck", "bitvec", "as_slice"]
 rustdoc-args = ["--cfg", "docsrs"]
 
 [package.metadata.playground]

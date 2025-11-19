@@ -21,3 +21,6 @@ mod impl_bytemuck;
 
 #[cfg(feature = "as_slice")]
 mod impl_as_slice;
+
+#[cfg(feature = "bitvec")]
+mod impl_bitvec;
