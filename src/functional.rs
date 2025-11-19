@@ -63,12 +63,10 @@ pub trait FunctionalSequence<T>: GenericSequence<T> {
     fn try_map<U, F, E>(self, f: F) -> Result<MappedSequence<Self, T, U>, E>
     where
         Self: MappedGenericSequence<T, U>,
-        Mapped<Self, T, U>: FallibleGenericSequence<U>,
+        MappedSequence<Self, T, U>: FromFallibleIterator<U>,
         F: FnMut(Self::Item) -> Result<U, E>,
     {
-        <Mapped<Self, T, U> as FallibleGenericSequence<U>>::from_fallible_iter(
-            self.into_iter().map(f),
-        )
+        FromFallibleIterator::from_fallible_iter(self.into_iter().map(f))
     }
 
     /// Combines two `GenericSequence` instances and iterates through both of them,

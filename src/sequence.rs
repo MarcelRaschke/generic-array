@@ -100,23 +100,9 @@ pub unsafe trait GenericSequence<T>: Sized + IntoIterator {
     }
 }
 
-/// Extension to `GenericSequence` for fallible initialization.
-///
-/// # Safety
-///
-/// Care must be taken when implementing such that methods are safe.
-///
-/// Lengths must match, and element drop on panic or error must be handled.
-pub unsafe trait FallibleGenericSequence<T>: GenericSequence<T> {
-    /// Initializes a new sequence instance using the given fallible function.
-    ///
-    /// If the generator function returns an error or panics while initializing the sequence,
-    /// any already initialized elements will be dropped and the error returned.
-    fn try_generate<F, E>(f: F) -> Result<Self::Sequence, E>
-    where
-        F: FnMut(usize) -> Result<T, E>;
-
-    /// Initializes a new sequence instance from a fallible iterator.
+/// Extension to `FromIterator` for fallible initialization.
+pub trait FromFallibleIterator<T>: Sized {
+    /// Initializes a new collection from a fallible iterator.
     ///
     /// If the iterator returns an error or panics while initializing the sequence,
     /// any already initialized elements will be dropped and the error returned.
@@ -124,9 +110,29 @@ pub unsafe trait FallibleGenericSequence<T>: GenericSequence<T> {
     /// This is equivalent to `iter.collect::<Result<GenericArray<T, N>, E>>()` _except_
     /// it won't panic due to `Result::from_iter` truncating the underlying iterator
     /// if an error occurs, leading to a length mismatch.
-    fn from_fallible_iter<I, E>(iter: I) -> Result<Self::Sequence, E>
+    fn from_fallible_iter<I, E>(iter: I) -> Result<Self, E>
     where
         I: IntoIterator<Item = Result<T, E>>;
+}
+
+/// Extension to `GenericSequence` for fallible initialization.
+///
+/// # Safety
+///
+/// Care must be taken when implementing such that methods are safe.
+///
+/// Lengths must match, and element drop on panic or error must be handled.
+pub unsafe trait FallibleGenericSequence<T>: GenericSequence<T>
+where
+    Self::Sequence: FromFallibleIterator<T>,
+{
+    /// Initializes a new sequence instance using the given fallible function.
+    ///
+    /// If the generator function returns an error or panics while initializing the sequence,
+    /// any already initialized elements will be dropped and the error returned.
+    fn try_generate<F, E>(f: F) -> Result<Self::Sequence, E>
+    where
+        F: FnMut(usize) -> Result<T, E>;
 }
 
 /// Accessor for `GenericSequence` item type, which is really `IntoIterator::Item`
@@ -154,6 +160,7 @@ where
 unsafe impl<'a, T: 'a, S: FallibleGenericSequence<T>> FallibleGenericSequence<T> for &'a S
 where
     &'a S: IntoIterator,
+    Self::Sequence: FromFallibleIterator<T>,
 {
     #[inline(always)]
     fn try_generate<F, E>(f: F) -> Result<Self::Sequence, E>
@@ -161,14 +168,6 @@ where
         F: FnMut(usize) -> Result<T, E>,
     {
         S::try_generate(f)
-    }
-
-    #[inline(always)]
-    fn from_fallible_iter<I, E>(iter: I) -> Result<Self::Sequence, E>
-    where
-        I: IntoIterator<Item = Result<T, E>>,
-    {
-        S::from_fallible_iter(iter)
     }
 }
 
@@ -191,6 +190,7 @@ where
 unsafe impl<'a, T: 'a, S: FallibleGenericSequence<T>> FallibleGenericSequence<T> for &'a mut S
 where
     &'a mut S: IntoIterator,
+    Self::Sequence: FromFallibleIterator<T>,
 {
     #[inline(always)]
     fn try_generate<F, E>(f: F) -> Result<Self::Sequence, E>
@@ -198,14 +198,6 @@ where
         F: FnMut(usize) -> Result<T, E>,
     {
         S::try_generate(f)
-    }
-
-    #[inline(always)]
-    fn from_fallible_iter<I, E>(iter: I) -> Result<Self::Sequence, E>
-    where
-        I: IntoIterator<Item = Result<T, E>>,
-    {
-        S::from_fallible_iter(iter)
     }
 }
 

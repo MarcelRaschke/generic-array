@@ -700,6 +700,19 @@ where
     }
 }
 
+impl<T, N: ArrayLength> FromFallibleIterator<T> for GenericArray<T, N> {
+    #[inline(always)]
+    fn from_fallible_iter<I, E>(iter: I) -> Result<Self, E>
+    where
+        I: IntoIterator<Item = Result<T, E>>,
+    {
+        match Self::try_from_fallible_iter(iter) {
+            Ok(res) => res,
+            Err(_) => from_iter_length_fail(N::USIZE),
+        }
+    }
+}
+
 unsafe impl<T, N: ArrayLength> FallibleGenericSequence<T> for GenericArray<T, N>
 where
     Self: IntoIterator<Item = T>,
@@ -733,17 +746,6 @@ where
             }
 
             Ok(builder.finish_and_assume_init())
-        }
-    }
-
-    #[inline(always)]
-    fn from_fallible_iter<I, E>(iter: I) -> Result<Self::Sequence, E>
-    where
-        I: IntoIterator<Item = Result<T, E>>,
-    {
-        match Self::try_from_fallible_iter(iter) {
-            Ok(res) => res,
-            Err(_) => from_iter_length_fail(N::USIZE),
         }
     }
 }
@@ -785,7 +787,7 @@ where
     fn try_map<U, F, E>(self, mut f: F) -> Result<MappedSequence<Self, T, U>, E>
     where
         Self: MappedGenericSequence<T, U>,
-        Mapped<Self, T, U>: FallibleGenericSequence<U>,
+        MappedSequence<Self, T, U>: FromFallibleIterator<U>,
         F: FnMut(Self::Item) -> Result<U, E>,
     {
         unsafe {
@@ -794,13 +796,11 @@ where
 
             let (array_iter, position) = source.iter_position();
 
-            <Mapped<Self, T, U> as FallibleGenericSequence<U>>::from_fallible_iter(array_iter.map(
-                |src| {
-                    let value = ptr::read(src);
-                    *position += 1;
-                    f(value)
-                },
-            ))
+            FromFallibleIterator::from_fallible_iter(array_iter.map(|src| {
+                let value = ptr::read(src);
+                *position += 1;
+                f(value)
+            }))
         }
     }
 

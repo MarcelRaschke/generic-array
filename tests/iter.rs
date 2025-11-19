@@ -1,5 +1,5 @@
 use generic_array::arr;
-use generic_array::sequence::FallibleGenericSequence;
+use generic_array::sequence::FromFallibleIterator as _;
 
 use std::cell::Cell;
 use std::ops::Drop;
