@@ -136,6 +136,7 @@
 //!     "subtle",           # Enables `subtle` crate support for constant-time equality checks and conditional selection
 //!     "arbitrary",        # Enables `arbitrary` crate support for fuzzing
 //!     "bytemuck",         # Enables `bytemuck` crate support
+//!     "bitvec",           # Enables `bitvec` crate support to use GenericArray as a storage backend for bit arrays
 //!     "compat-0_14",      # Enables interoperability with `generic-array` 0.14
 //!     "hybrid-array-0_4"  # Enables interoperability with `hybrid-array` 0.4
 //! ]
