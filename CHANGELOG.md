@@ -1,3 +1,6 @@
+* **`1.4.5`**
+    * Reduce needed recursion limit to avoid next-solver FCW [#172](https://github.com/fizyk20/generic-array/pull/172)
+
 * **`1.4.4`**
     * Improved on some impossibly rare edge cases
 
